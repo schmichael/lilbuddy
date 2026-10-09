@@ -2,7 +2,8 @@
 
 A small, Vim-style terminal inbox for GitHub issues and pull requests.
 
-Mostly slop to scratch an itch.
+Mostly slop to scratch an itch. Might switch it to be a GitHub notifications
+frontend. Will probably drop it.
 
 ## Run
 
