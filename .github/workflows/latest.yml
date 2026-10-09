@@ -1,0 +1,92 @@
+name: Latest release
+
+on:
+  push:
+    branches: [main]
+
+# A newer main commit supersedes any older build or release in progress.
+concurrency:
+  group: latest-release
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Test and build binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test
+        run: go test -race ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Build Linux and macOS binaries
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p dist
+          for os in linux darwin; do
+            platform="$os"
+            if [ "$os" = darwin ]; then
+              platform=macos
+            fi
+            for arch in arm64 amd64; do
+              GOOS="$os" GOARCH="$arch" go build \
+                -trimpath \
+                -ldflags "-s -w -X main.version=latest-${GITHUB_SHA}" \
+                -o "dist/lilbuddy-${platform}-${arch}" .
+            done
+          done
+          cd dist
+          sha256sum lilbuddy-* > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-binaries
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Update latest release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-binaries
+          path: dist
+      - name: Update tag and publish binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Keep the release tag aligned with the commit used to build the binaries.
+          if gh api "repos/${GH_REPO}/git/ref/tags/latest" > /dev/null 2>&1; then
+            gh api --method PATCH "repos/${GH_REPO}/git/refs/tags/latest" \
+              -f sha="$GITHUB_SHA" -F force=true
+          else
+            gh api --method POST "repos/${GH_REPO}/git/refs" \
+              -f ref=refs/tags/latest -f sha="$GITHUB_SHA"
+          fi
+
+          notes="Automatically built from main at commit ${GITHUB_SHA}.
+
+          Assets: Linux and macOS, each for arm64 and amd64.
+          After downloading a binary, run chmod +x on it before launching.
+          Verify downloads against SHA256SUMS."
+
+          if gh release view latest > /dev/null 2>&1; then
+            gh release edit latest --title "Latest" --notes "$notes" --latest
+          else
+            gh release create latest --verify-tag --title "Latest" \
+              --notes "$notes" --latest
+          fi
+          gh release upload latest dist/* --clobber
