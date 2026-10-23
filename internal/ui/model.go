@@ -18,30 +18,32 @@ import (
 )
 
 type Model struct {
-	client        *github.Client
-	store         *state.Store
-	viewer        string
-	interval      time.Duration
-	ctx           context.Context
-	items         []github.Item
-	allItems      []github.Item
-	showDrafts    bool
-	warnings      []string
-	cursor        int
-	width         int
-	height        int
-	buddyFrame    int
-	spinnerFrame  int
-	spinning      bool
-	loading       bool
-	opening       bool
-	revision      int
-	status        string
-	err           error
-	updated       time.Time
-	cached        bool
-	authenticated bool
-	connect       Connect
+	client             *github.Client
+	store              *state.Store
+	viewer             string
+	interval           time.Duration
+	lastInteraction    time.Time
+	lastRefreshAttempt time.Time
+	ctx                context.Context
+	items              []github.Item
+	allItems           []github.Item
+	showDrafts         bool
+	warnings           []string
+	cursor             int
+	width              int
+	height             int
+	buddyFrame         int
+	spinnerFrame       int
+	spinning           bool
+	loading            bool
+	opening            bool
+	revision           int
+	status             string
+	err                error
+	updated            time.Time
+	cached             bool
+	authenticated      bool
+	connect            Connect
 	// Injectable so tests never launch a browser.
 	open func(context.Context, string) error
 }
@@ -64,12 +66,19 @@ type tick struct{}
 
 type spinnerTick struct{}
 
+const (
+	activityWindow      = 5 * time.Minute
+	idleRefreshInterval = time.Hour
+)
+
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 type Connect func(context.Context) (*github.Client, string, error)
 
 func New(ctx context.Context, client *github.Client, store *state.Store, viewer string, interval time.Duration) Model {
 	m := Model{ctx: ctx, client: client, store: store, viewer: viewer, interval: interval, width: 100, height: 24, loading: true, spinning: true, open: OpenBrowser, authenticated: client != nil && viewer != ""}
+	m.lastInteraction = time.Now()
+	m.lastRefreshAttempt = m.lastInteraction
 	m.restoreCache()
 	return m
 }
@@ -92,6 +101,7 @@ func nextSpinnerTick() tea.Cmd {
 // startLoading keeps a single spinner loop alive for the duration of a refresh.
 func (m *Model) startLoading() tea.Cmd {
 	m.loading = true
+	m.lastRefreshAttempt = time.Now()
 	if m.spinning {
 		return nil
 	}
@@ -134,7 +144,20 @@ func (m Model) nextTick() tea.Cmd {
 	if m.interval <= 0 {
 		return nil
 	}
-	return tea.Tick(m.interval, func(time.Time) tea.Msg { return tick{} })
+	// Keep checking locally while idle so keyboard activity restores the active
+	// cadence without waiting for an hour-long timer. Only refreshDue permits API calls.
+	return tea.Tick(min(m.interval, activityWindow), func(time.Time) tea.Msg { return tick{} })
+}
+
+func (m Model) refreshDue(now time.Time) bool {
+	if m.interval <= 0 {
+		return false
+	}
+	interval := m.interval
+	if now.Sub(m.lastInteraction) >= activityWindow {
+		interval = max(interval, idleRefreshInterval)
+	}
+	return now.Sub(m.lastRefreshAttempt) >= interval
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -186,12 +209,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tick:
 		cmd := m.nextTick()
-		if !m.loading {
+		if !m.loading && m.refreshDue(time.Now()) {
 			spin := m.startLoading()
 			return m, tea.Batch(cmd, spin, m.load())
 		}
 		return m, cmd
 	case tea.KeyMsg:
+		m.lastInteraction = time.Now()
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit

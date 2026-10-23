@@ -32,7 +32,7 @@ func run() error {
 		return err
 	}
 	path := flag.String("state", defaultPath, "path to local JSON state")
-	interval := flag.Duration("refresh", 5*time.Minute, "automatic refresh interval (0 disables)")
+	interval := flag.Duration("refresh", 5*time.Minute, "active refresh interval; at least 1h after 5m idle (0 disables)")
 	limit := flag.Int("limit", 300, "maximum results per discovery source (1–1000)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()

@@ -269,6 +269,8 @@ func TestClosedItemsStayHiddenWithDraftsShown(t *testing.T) {
 
 func TestRefreshSpinner(t *testing.T) {
 	m := testModel(t)
+	m.interval = 5 * time.Minute
+	m.lastRefreshAttempt = time.Now().Add(-6 * time.Minute)
 	m.spinning = false
 	if strings.Contains(m.View(), "refreshing") {
 		t.Fatal("idle view shows a spinner")

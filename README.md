@@ -105,6 +105,12 @@ tab. Navigation, draft visibility, and refreshes are not recorded in history.
 Writes use an atomic replacement and private file
 permissions. Use one running instance per state file to avoid competing writes.
 
+Automatic refresh runs every 5 minutes while you have used the keyboard within
+the past 5 minutes. After 5 minutes without keyboard input, it slows to once an
+hour. Keyboard input restores the active cadence, and `r` refreshes immediately.
+`--refresh` changes the active interval; the idle interval is at least one hour
+(or the configured interval, if longer). Startup always refreshes immediately.
+
 ```sh
 ./lilbuddy --state ./triage.json --refresh 2m --limit 1000
 ./lilbuddy --refresh 0          # manual refresh only
